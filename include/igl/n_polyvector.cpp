@@ -26,7 +26,8 @@ namespace igl {
   private:
     const Eigen::PlainObjectBase<DerivedV> &V;
     const Eigen::PlainObjectBase<DerivedF> &F; int numF;
-    const int n;
+    const int n,rgs=4;
+	 double p=0.5;
 
     Eigen::MatrixXi EV; int numE;
     Eigen::MatrixXi F2E;
@@ -45,7 +46,9 @@ namespace igl {
     IGL_INLINE void computek();
     IGL_INLINE void setFieldFromGeneralCoefficients(const  std::vector<Eigen::Matrix<std::complex<typename DerivedV::Scalar>, Eigen::Dynamic,1> > &coeffs,
                                                     std::vector<Eigen::Matrix<typename DerivedV::Scalar, Eigen::Dynamic, 2> > &pv);
-    IGL_INLINE void computeCoefficientLaplacian(int n, Eigen::SparseMatrix<std::complex<typename DerivedV::Scalar> > &D);
+    IGL_INLINE void computeCoefficientLaplacian(int n, 
+											Eigen::Matrix<std::complex<typename DerivedV::Scalar>, Eigen::Dynamic, 1> &W,
+												Eigen::SparseMatrix<std::complex<typename DerivedV::Scalar> > &D);
     IGL_INLINE void getGeneralCoeffConstraints(const Eigen::VectorXi &isConstrained,
                                     const Eigen::Matrix<typename DerivedV::Scalar, Eigen::Dynamic, Eigen::Dynamic> &cfW,
                                     int k,
@@ -58,7 +61,9 @@ namespace igl {
                                          const Eigen::VectorXi isConstrained,
                                          const Eigen::Matrix<std::complex<typename DerivedV::Scalar>, Eigen::Dynamic, 1> &xknown,
                                          Eigen::Matrix<std::complex<typename DerivedV::Scalar>, Eigen::Dynamic, 1> &x);
-
+	IGL_INLINE void computW(int n,
+		const Eigen::Matrix<std::complex<typename DerivedV::Scalar>, Eigen::Dynamic, 1> &x,
+		Eigen::Matrix<std::complex<typename DerivedV::Scalar>, Eigen::Dynamic, 1> &W);
   public:
     IGL_INLINE PolyVectorFieldFinder(const Eigen::PlainObjectBase<DerivedV> &_V,
                                      const Eigen::PlainObjectBase<DerivedF> &_F,
@@ -83,7 +88,7 @@ n(_n)
 
   igl::edge_topology(V,F,EV,F2E,E2F);
   numE = EV.rows();
-
+ 
 
   precomputeInteriorEdges();
 
@@ -105,7 +110,7 @@ precomputeInteriorEdges()
 
   for(unsigned i=0; i<numE; ++i)
   {
-    if ((E2F(i,0) == -1) || ((E2F(i,1) == -1)))
+	  if ((E2F(i, 0) == -1) || ((E2F(i, 1) == -1)))
       isBorderEdge[i] = 1;
       else
       {
@@ -113,7 +118,7 @@ precomputeInteriorEdges()
         numInteriorEdges++;
       }
   }
-
+ // std::cout << E2F << std::endl;
   E2F_int.resize(numInteriorEdges, 2);
   indInteriorToFull.setZero(numInteriorEdges,1);
   int ii = 0;
@@ -128,6 +133,55 @@ precomputeInteriorEdges()
 
 }
 
+template<typename DerivedV, typename DerivedF>
+IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::computW(int n,
+	const Eigen::Matrix<std::complex<typename DerivedV::Scalar>, Eigen::Dynamic, 1> &x,
+	Eigen::Matrix<std::complex<typename DerivedV::Scalar>, Eigen::Dynamic, 1> &W)
+{
+	W.setOnes();
+	std::cout << "this is the function we want to implement" << std::endl;
+	// For every non-border edge
+	double esum = 0;
+	double B;
+	double min = 0.000000000001;
+	for (unsigned eid = 0; eid < numE; eid++)
+	{
+		if (!isBorderEdge[eid])
+		{
+			if (p != 2) {
+
+
+				int fid0 = E2F(eid, 0);
+				int fid1 = E2F(eid, 1);
+				std::complex<double>  A = x[fid0] * std::polar(1., 1.*n*K[eid]) - x[fid1];
+				std::cout << "x" << x << std::endl;
+				std::cout << "n" << n << std::endl;
+				std::cout << "x0" << x[fid0] * std::polar(1., 1.*n*K[eid]) <<"x1"<< x[fid1] << std::endl;
+				if (abs(A)>=min) {
+					std::cout << "not zero" << std::endl;
+					B = pow(abs(imag(A)), p - 2) + pow(abs(real(A)), p - 2);
+					std::cout << "differences between coeff" << A << std::endl;
+					W[eid] = pow(B, (1 / (p - 2)));
+				}
+				else {
+					std::cout << "both is 0" << std::endl;
+					W[eid] = 1;
+				}
+				//compute the sum of the energy
+				double e = pow((pow(abs(imag(A)), p) + pow(abs(real(A)), p)), 1 / p);
+				esum += e;
+				
+	//			std::cout << "W"<<W<< std::endl;
+				
+			}
+		}
+	}
+	
+	std::cout << "this is esum" << std::endl;
+	std::cout << esum << std::endl;
+	esum = 0;
+}
+
 
 template<typename DerivedV, typename DerivedF>
 IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::
@@ -138,8 +192,8 @@ minQuadWithKnownMini(const Eigen::SparseMatrix<std::complex<typename DerivedV::S
                           Eigen::Matrix<std::complex<typename DerivedV::Scalar>, Eigen::Dynamic, 1> &x)
 {
   int N = Q.rows();
-
   int nc = xknown.rows();
+  std::cout << "Q" << Q << std::endl;
   Eigen::VectorXi known; known.setZero(nc,1);
   Eigen::VectorXi unknown; unknown.setZero(N-nc,1);
 
@@ -155,12 +209,11 @@ minQuadWithKnownMini(const Eigen::SparseMatrix<std::complex<typename DerivedV::S
       unknown[indu] = i;
       indu++;
     }
-
+ 
   Eigen::SparseMatrix<std::complex<typename DerivedV::Scalar> > Quu, Quk;
 
   igl::slice(Q,unknown, unknown, Quu);
   igl::slice(Q,unknown, known, Quk);
-
 
   std::vector<typename Eigen::Triplet<std::complex<typename DerivedV::Scalar> > > tripletList;
 
@@ -168,16 +221,17 @@ minQuadWithKnownMini(const Eigen::SparseMatrix<std::complex<typename DerivedV::S
 
   igl::slice(f,unknown, Eigen::VectorXi::Zero(1,1), fu);
 
-  Eigen::SparseMatrix<std::complex<typename DerivedV::Scalar> > rhs = (Quk*xknown).sparseView()+.5*fu;
-
+  Eigen::SparseMatrix<std::complex<typename DerivedV::Scalar> > rhs = (Quk*xknown).sparseView()-.5*fu;
   Eigen::SparseLU< Eigen::SparseMatrix<std::complex<typename DerivedV::Scalar> > > solver;
   solver.compute(-Quu);
+  
   if(solver.info()!=Eigen::Success)
   {
     std::cerr<<"Decomposition failed!"<<std::endl;
     return;
   }
   Eigen::SparseMatrix<std::complex<typename DerivedV::Scalar> >  b  = solver.solve(rhs);
+  std::cout << "b(solving)" << b << std::endl;
   if(solver.info()!=Eigen::Success)
   {
     std::cerr<<"Solving failed!"<<std::endl;
@@ -191,10 +245,8 @@ minQuadWithKnownMini(const Eigen::SparseMatrix<std::complex<typename DerivedV::S
       x[i] = xknown[indk++];
     else
       x[i] = b.coeff(indu++,0);
-
+ 
 }
-
-
 
 template<typename DerivedV, typename DerivedF>
 IGL_INLINE bool igl::PolyVectorFieldFinder<DerivedV, DerivedF>::
@@ -222,17 +274,25 @@ IGL_INLINE bool igl::PolyVectorFieldFinder<DerivedV, DerivedF>::
                                cfW,
                                i,
                                Ck);
-
+//	std::cout << "N=" << n << std::endl;
+//	std::cout << "I=" << i << std::endl;
+//	std::cout << "Ck" << Ck << std::endl;
     Eigen::SparseMatrix<std::complex<typename DerivedV::Scalar> > DD;
-    computeCoefficientLaplacian(degree, DD);
-    Eigen::SparseMatrix<std::complex<typename DerivedV::Scalar> > f; f.resize(numF,1);
+	Eigen::Matrix<std::complex<typename DerivedV::Scalar>, Eigen::Dynamic, 1> W;
+	W.resize(numE, 1);
+	W.setOnes();
+	for (int o = 0; o <= rgs; o++) {
+		computeCoefficientLaplacian(degree, W, DD);
+		Eigen::SparseMatrix<std::complex<typename DerivedV::Scalar> > f; f.resize(numF, 1);
+		minQuadWithKnownMini(DD, f, isConstrained, Ck, coeffs[i]);
+	//	std::cout << coeffs[i](0)* std::polar(1., 1.*K[1]) << std::endl;
+		computW(degree,coeffs[i], W);
+		std::cout << "this is the" << o <<"  times calculation" << std::endl;
+	}
 
-    minQuadWithKnownMini(DD, f, isConstrained, Ck, coeffs[i]);
   }
-
   std::vector<Eigen::Matrix<typename DerivedV::Scalar, Eigen::Dynamic, 2> > pv;
   setFieldFromGeneralCoefficients(coeffs, pv);
-
   output.setZero(numF,3*n);
   for (int fi=0; fi<numF; ++fi)
   {
@@ -264,16 +324,18 @@ IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::setFieldFromGene
       int degree = 2*(k+1);
       polyCoeff[degree] = (1.*sign)*coeffs[k](i);
     }
-
+	
     Eigen::Matrix<std::complex<typename DerivedV::Scalar>, Eigen::Dynamic,1> roots;
     igl::polyRoots<std::complex<typename DerivedV::Scalar>, typename DerivedV::Scalar >(polyCoeff,roots);
-
+//	std::cout << "roots" << roots << std::endl;
     Eigen::VectorXi done; done.setZero(2*n,1);
-
+	//std::cout << "done(initial)" << done << std::endl;
     Eigen::Matrix<std::complex<typename DerivedV::Scalar>, Eigen::Dynamic,1> u(n,1);
     int ind =0;
     for (int k=0; k<2*n; ++k)
     {
+	//	std::cout << "k" << k << std::endl;
+	//	std::cout << "done" << done << std::endl;
       if (done[k])
         continue;
       u[ind] = roots[k];
@@ -283,11 +345,14 @@ IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::setFieldFromGene
       double mind = 1e10;
       for (int l =k+1; l<2*n; ++l)
       {
+	//	  std::cout << "l" << l << std::endl;
         double dist = abs(roots[l]+u[ind]);
         if (dist<mind)
         {
           mind = dist;
           mini = l;
+	//	  std::cout << "dist" << dist << std::endl;
+	//	  std::cout << "mini" << mini << std::endl;
         }
       }
       done[mini] = 1;
@@ -304,7 +369,7 @@ IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::setFieldFromGene
 
 
 template<typename DerivedV, typename DerivedF>
-IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::computeCoefficientLaplacian(int n, Eigen::SparseMatrix<std::complex<typename DerivedV::Scalar> > &D)
+IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::computeCoefficientLaplacian(int n, Eigen::Matrix<std::complex<typename DerivedV::Scalar>, Eigen::Dynamic, 1> &W, Eigen::SparseMatrix<std::complex<typename DerivedV::Scalar> > &D)
 {
   std::vector<Eigen::Triplet<std::complex<typename DerivedV::Scalar> > > tripletList;
 
@@ -318,23 +383,23 @@ IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::computeCoefficie
 
       tripletList.push_back(Eigen::Triplet<std::complex<typename DerivedV::Scalar> >(fid0,
                                            fid0,
-                                           std::complex<typename DerivedV::Scalar>(1.)));
+                                           std::complex<typename DerivedV::Scalar>(1.*W[eid])));
       tripletList.push_back(Eigen::Triplet<std::complex<typename DerivedV::Scalar> >(fid1,
                                            fid1,
-                                           std::complex<typename DerivedV::Scalar>(1.)));
+                                           std::complex<typename DerivedV::Scalar>(1.*W[eid])));
       tripletList.push_back(Eigen::Triplet<std::complex<typename DerivedV::Scalar> >(fid0,
                                            fid1,
-                                                                                     -1.*std::polar(1.,-1.*n*K[eid])));
+                                                                                     -1.*W[eid] *std::polar(1.,-1.*n*K[eid])));
       tripletList.push_back(Eigen::Triplet<std::complex<typename DerivedV::Scalar> >(fid1,
                                            fid0,
-                                                                                     -1.*std::polar(1.,1.*n*K[eid])));
-
+                                                                                     -1.*W[eid] *std::polar(1.,1.*n*K[eid])));
+//	  std::cout << "rotation complex" << std::polar(1., -1.*K[eid]) << std::endl;
     }
   }
   D.resize(numF,numF);
   D.setFromTriplets(tripletList.begin(), tripletList.end());
 
-
+  
 }
 
 template<typename DerivedV, typename DerivedF>
@@ -351,6 +416,7 @@ IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::getGeneralCoeffC
   {
     Eigen::VectorXi V = Eigen::VectorXi::LinSpaced(n,0,n-1);
     igl::nchoosek(V,k+1,allCombs);
+//	std::cout << "allcombs"<<allCombs << std::endl;
   }
 
 
@@ -370,8 +436,10 @@ IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::getGeneralCoeffC
         for (int i = 0; i < allCombs.cols(); ++i)
         {
           int index = allCombs(j,i);
+//		  std::cout << "index" << index << std::endl;
 
           const Eigen::Matrix<typename DerivedV::Scalar, 1, 3> &w = cfW.block(fi,3*index,1,3);
+//		  std::cout << "w" << w << std::endl;
           typename DerivedV::Scalar w0 = w.dot(b1);
           typename DerivedV::Scalar w1 = w.dot(b2);
           std::complex<typename DerivedV::Scalar> u(w0,w1);
@@ -382,7 +450,11 @@ IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::getGeneralCoeffC
       }
       Ck(ind) = ck;
       ind ++;
+//	  std::cout << "Ck" << Ck << std::endl;
+	
     }
+//	std::cout << "ck"<<Ck << std::endl;
+	
   }
 
 
@@ -402,7 +474,8 @@ IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::computek()
 
       Eigen::Matrix<typename DerivedV::Scalar, 1, 3> N0 = FN.row(fid0);
       Eigen::Matrix<typename DerivedV::Scalar, 1, 3> N1 = FN.row(fid1);
-
+//	  std::cout <<"n0"<< N0 << std::endl;
+//	  std::cout << "n1"<<N1 << std::endl;
       // find common edge on triangle 0 and 1
       int fid0_vc = -1;
       int fid1_vc = -1;
@@ -416,7 +489,7 @@ IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::computek()
       assert(fid0_vc != -1);
       assert(fid1_vc != -1);
 
-      Eigen::Matrix<typename DerivedV::Scalar, 1, 3> common_edge = V.row(F(fid0,(fid0_vc+1)%3)) - V.row(F(fid0,fid0_vc));
+      Eigen::Matrix<typename DerivedV::Scalar, 1, 3> common_edge = V.row(F(fid0,(fid0_vc+1)%3)) - V.row(F(fid0,fid0_vc));//   attention
       common_edge.normalize();
 
       // Map the two triangles in a new space where the common edge is the x axis and the N0 the z axis
@@ -450,7 +523,7 @@ IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::computek()
       // compute rotation R such that R * N1 = N0
       // i.e. map both triangles to the same plane
       double alpha = -atan2(V1((fid1_vc+2)%3,2),V1((fid1_vc+2)%3,1));
-
+//	  std::cout << "alpha" << alpha << std::endl;
       Eigen::Matrix<typename DerivedV::Scalar, 3, 3> R;
       R << 1,          0,            0,
       0, cos(alpha), -sin(alpha) ,
@@ -481,6 +554,7 @@ IGL_INLINE void igl::PolyVectorFieldFinder<DerivedV, DerivedF>::computek()
 //      assert(tmp1(1) - ref1(1) < 1e-10);
 
       K[eid] = ktemp;
+//	  std::cout << "ktemp" << ktemp << std::endl;
     }
   }
 
@@ -493,23 +567,29 @@ IGL_INLINE void igl::n_polyvector(const Eigen::MatrixXd &V,
                              const Eigen::MatrixXd& bc,
                              Eigen::MatrixXd &output)
 {
+	std::cout << "bc";
+	std::cout << bc<< std::endl;
+
   Eigen::VectorXi isConstrained = Eigen::VectorXi::Constant(F.rows(),0);
   Eigen::MatrixXd cfW = Eigen::MatrixXd::Constant(F.rows(),bc.cols(),0);
 
   for(unsigned i=0; i<b.size();++i)
   {
     isConstrained(b(i)) = 1;
-    cfW.row(b(i)) << bc.row(i);
+    cfW.row( b(i)) << bc.row(i);//move the constraints into the big matrix
   }
-  if (b.size() == F.rows())
+  if (b.size() == F.rows())  //confuse
   {
     output = cfW;
+	
     return;
   }
-
+  
   int n = cfW.cols()/3;
+  
   igl::PolyVectorFieldFinder<Eigen::MatrixXd, Eigen::MatrixXi> pvff(V,F,n);
   pvff.solve(isConstrained, cfW, output);
+ 
 }
 
 
